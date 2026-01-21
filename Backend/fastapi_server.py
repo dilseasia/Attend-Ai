@@ -3701,7 +3701,108 @@ def get_day_attendance_status(
         if conn:
             conn.close()
 
+@app.get("/api/average-working-hours")
+def get_average_working_hours():
+    """Calculate average office hours per employee from attendance logs (excluding today)."""
+    conn = None
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
 
+        today = datetime.now().date()
+
+        # Fetch attendance logs excluding today
+        cursor.execute("""
+            SELECT emp_id, name, DATE(date) AS day, time, camera
+            FROM attendance_logs
+            WHERE DATE(date) < %s
+            ORDER BY emp_id, day, time
+        """, (today,))
+
+        rows = cursor.fetchall()
+        cursor.close()
+
+        # Group logs by employee and day
+        employee_data = {}
+
+        for emp_id, name, day, time, camera in rows:
+            if emp_id not in employee_data:
+                employee_data[emp_id] = {
+                    "name": name,
+                    "daily_logs": {}
+                }
+            
+            day_str = str(day)
+            if day_str not in employee_data[emp_id]["daily_logs"]:
+                employee_data[emp_id]["daily_logs"][day_str] = []
+            
+            employee_data[emp_id]["daily_logs"][day_str].append({
+                "time": time,
+                "camera": camera.lower()
+            })
+
+        # Calculate average office hours per employee
+        results = []
+
+        for emp_id, data in employee_data.items():
+            total_office_seconds = 0
+            day_count = 0
+
+            for day_str, day_logs in data["daily_logs"].items():
+                # Sort logs by time
+                sorted_logs = sorted(day_logs, key=lambda x: x["time"])
+
+                # ----------------------
+                # OFFICE HOURS (ENTRY–EXIT PAIRS)
+                # Same logic as day-status API
+                # ----------------------
+                office_seconds = 0
+                state = "outside"
+                last_entry_sec = None
+
+                for lg in sorted_logs:
+                    h, m, s = map(int, str(lg["time"]).split(":"))
+                    sec = h * 3600 + m * 60 + s
+
+                    if lg["camera"] == "entry" and state == "outside":
+                        last_entry_sec = sec
+                        state = "inside"
+
+                    elif lg["camera"] == "exit" and state == "inside":
+                        office_seconds += sec - last_entry_sec
+                        state = "outside"
+
+                # If still inside at end of day, don't count (since it's a past day)
+                # We only count completed entry-exit pairs
+
+                if office_seconds > 0:
+                    total_office_seconds += office_seconds
+                    day_count += 1
+
+            if day_count == 0:
+                continue
+
+            # Calculate average
+            avg_seconds = total_office_seconds / day_count
+            hours = int(avg_seconds // 3600)
+            minutes = int((avg_seconds % 3600) // 60)
+
+            results.append({
+                "name": data["name"],
+                "emp_id": emp_id,
+                "avg_hours": f"{hours}h {minutes}m"
+            })
+
+        return {"averages": results}
+
+    except Exception as e:
+        print("❌ Error computing averages:", e)
+        return {"averages": []}
+
+    finally:
+        if conn:
+            conn.close()
 
 
 
@@ -3979,76 +4080,11 @@ def get_daily_summary_api(date: str):
 
 
 
-@app.get("/api/average-working-hours")
-def get_average_working_hours():
-    """Calculate average working hours per employee (excluding today)."""
-    conn = None
-    try:
-        #  Connect to PostgreSQL
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
 
-        today = datetime.now().date()
-
-        #  Fetch working_hours strings excluding today
-        cursor.execute("""
-            SELECT name, emp_id, working_hours
-            FROM daily_summary
-            WHERE date < %s
-        """, (today,))
-
-        rows = cursor.fetchall()
-        cursor.close()
-
-        #  Convert working_hours ("8h 30m") → total minutes
-        time_map = {}
-
-        for name, emp_id, wh in rows:
-            if not wh:
-                continue
-            try:
-                parts = wh.split()
-                hours = int(parts[0].replace("h", "")) if "h" in parts[0] else 0
-                minutes = int(parts[1].replace("m", "")) if len(parts) > 1 else 0
-                total_minutes = hours * 60 + minutes
-            except Exception:
-                continue
-
-            if emp_id not in time_map:
-                time_map[emp_id] = {"name": name, "total": 0, "count": 0}
-
-            time_map[emp_id]["total"] += total_minutes
-            time_map[emp_id]["count"] += 1
-
-        #  Compute averages
-        results = []
-        for emp_id, info in time_map.items():
-            if info["count"] == 0:
-                continue
-
-            avg_minutes = info["total"] / info["count"]
-            hours = int(avg_minutes // 60)
-            minutes = int(avg_minutes % 60)
-
-            results.append({
-                "name": info["name"],
-                "emp_id": emp_id,
-                "avg_hours": f"{hours}h {minutes}m"
-            })
-
-        return {"averages": results}
-
-    except Exception as e:
-        print(" Error computing averages:", e)
-        return {"averages": []}
-
-    finally:
-        if conn:
-            conn.close()
 
 @app.get("/api/average-working-hours-employee")
 def get_average_working_hours_by_user(emp_id: str):
-    """Calculate average working hours for a specific employee (excluding today)."""
+    """Calculate average office hours for a specific employee from attendance logs (excluding today)."""
     conn = None
     try:
         # Connect to PostgreSQL
@@ -4057,11 +4093,12 @@ def get_average_working_hours_by_user(emp_id: str):
 
         today = datetime.now().date()
 
-        # Fetch working_hours strings for specific employee excluding today
+        # Fetch attendance logs for specific employee excluding today
         cursor.execute("""
-            SELECT name, working_hours
-            FROM daily_summary
-            WHERE emp_id = %s AND date < %s
+            SELECT name, DATE(date) AS day, time, camera
+            FROM attendance_logs
+            WHERE emp_id = %s AND DATE(date) < %s
+            ORDER BY day, time
         """, (emp_id, today))
 
         rows = cursor.fetchall()
@@ -4076,25 +4113,56 @@ def get_average_working_hours_by_user(emp_id: str):
                 "message": "No data found for this employee"
             }
 
-        # Convert working_hours ("8h 30m") → total minutes
-        total_minutes = 0
-        count = 0
+        # Get employee name
         employee_name = rows[0][0]
 
-        for name, wh in rows:
-            if not wh:
-                continue
-            try:
-                parts = wh.split()
-                hours = int(parts[0].replace("h", "")) if "h" in parts[0] else 0
-                minutes = int(parts[1].replace("m", "")) if len(parts) > 1 else 0
-                total_minutes += hours * 60 + minutes
-                count += 1
-            except Exception:
-                continue
+        # Group logs by day
+        daily_logs = {}
+        for name, day, time, camera in rows:
+            day_str = str(day)
+            if day_str not in daily_logs:
+                daily_logs[day_str] = []
+            
+            daily_logs[day_str].append({
+                "time": time,
+                "camera": camera.lower()
+            })
+
+        # Calculate office hours for each day
+        total_office_seconds = 0
+        day_count = 0
+
+        for day_str, day_logs in daily_logs.items():
+            # Sort logs by time
+            sorted_logs = sorted(day_logs, key=lambda x: x["time"])
+
+            # ----------------------
+            # OFFICE HOURS (ENTRY–EXIT PAIRS)
+            # Same logic as day-status API
+            # ----------------------
+            office_seconds = 0
+            state = "outside"
+            last_entry_sec = None
+
+            for lg in sorted_logs:
+                h, m, s = map(int, str(lg["time"]).split(":"))
+                sec = h * 3600 + m * 60 + s
+
+                if lg["camera"] == "entry" and state == "outside":
+                    last_entry_sec = sec
+                    state = "inside"
+
+                elif lg["camera"] == "exit" and state == "inside":
+                    office_seconds += sec - last_entry_sec
+                    state = "outside"
+
+            # Only count days with completed entry-exit pairs
+            if office_seconds > 0:
+                total_office_seconds += office_seconds
+                day_count += 1
 
         # Compute average
-        if count == 0:
+        if day_count == 0:
             return {
                 "emp_id": emp_id,
                 "name": employee_name,
@@ -4103,20 +4171,23 @@ def get_average_working_hours_by_user(emp_id: str):
                 "message": "No valid working hours data"
             }
 
-        avg_minutes = total_minutes / count
-        hours = int(avg_minutes // 60)
-        minutes = int(avg_minutes % 60)
+        avg_seconds = total_office_seconds / day_count
+        avg_hours = int(avg_seconds // 3600)
+        avg_minutes = int((avg_seconds % 3600) // 60)
+
+        total_hours = int(total_office_seconds // 3600)
+        total_minutes = int((total_office_seconds % 3600) // 60)
 
         return {
             "emp_id": emp_id,
             "name": employee_name,
-            "avg_hours": f"{hours}h {minutes}m",
-            "total_days": count,
-            "total_hours": f"{int(total_minutes // 60)}h {int(total_minutes % 60)}m"
+            "avg_hours": f"{avg_hours}h {avg_minutes}m",
+            "total_days": day_count,
+            "total_hours": f"{total_hours}h {total_minutes}m"
         }
 
     except Exception as e:
-        print("Error computing average for user:", e)
+        print("❌ Error computing average for user:", e)
         return {
             "emp_id": emp_id,
             "error": str(e)
