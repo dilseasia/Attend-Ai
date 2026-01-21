@@ -1462,13 +1462,22 @@ async def recognize_face(
                     }
                     logging.info(f"✅ Device token stored for employee {emp_id}")
             
-            # Replace URL in response
+            # 🔥 Get dynamic base URL from baseurl.json
+            base_url = get_base_url_from_json()
+            
+            # Replace URL in response with dynamic base URL
             match_data = result["match"].copy()
-            if "profile_photo" in match_data:
-                match_data["profile_photo"] = match_data["profile_photo"].replace(
-                    "http://10.8.11.183:8000",
-                    "https://label-discount-mats-cohen.trycloudflare.com"
-                )
+            if "profile_photo" in match_data and match_data["profile_photo"]:
+                # Extract the path after the domain
+                old_url = match_data["profile_photo"]
+                # Remove any existing base URL
+                if "http://" in old_url or "https://" in old_url:
+                    # Extract path after domain
+                    path = old_url.split("/", 3)[-1] if "/" in old_url else ""
+                    match_data["profile_photo"] = f"{base_url}/{path}"
+                else:
+                    # If it's already a relative path
+                    match_data["profile_photo"] = f"{base_url}/{old_url.lstrip('/')}"
             
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
@@ -3419,6 +3428,27 @@ def get_day_status(total_hours: str, office_hours: str) -> str:
 
 
 
+# Add this helper function near the top of your file (after imports)
+import json
+from pathlib import Path
+
+def get_base_url_from_json():
+    """Read base URL from baseurl.json file"""
+    try:
+        baseurl_file = Path("baseurl.json")
+        if baseurl_file.exists():
+            with open(baseurl_file, 'r') as f:
+                data = json.load(f)
+                # Check both possible field names
+                return data.get('baseurl') or data.get('base_url') or "http://localhost:8000"
+        else:
+            return "http://localhost:8000"
+    except Exception as e:
+        print(f"⚠️ Error reading baseurl.json: {e}")
+        return "http://localhost:8000"
+
+
+# Replace your existing API function with this updated version
 @app.get("/api/logs/day-status")
 def get_day_attendance_status(
     emp_id: str = Query(...),
@@ -3489,7 +3519,7 @@ def get_day_attendance_status(
         # PROFILE PHOTO (SKIP auto_ & embeddings)
         # ======================
         profile_photo = None
-        base_url = "https://label-discount-mats-cohen.trycloudflare.com"
+        base_url = get_base_url_from_json()  # 🔥 Read from baseurl.json
 
         if os.path.exists("known_faces"):
             for folder in os.listdir("known_faces"):
@@ -3652,7 +3682,7 @@ def get_day_attendance_status(
         # ======================
         return {
             "emp_id": emp_id,
-            "name": emp_name,  # ✅ Added employee name
+            "name": emp_name,
             "range": range,
             "from": str(start_date),
             "to": str(end_date),
@@ -3670,8 +3700,6 @@ def get_day_attendance_status(
     finally:
         if conn:
             conn.close()
-
-
 
 
 
