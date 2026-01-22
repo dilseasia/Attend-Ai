@@ -135,13 +135,14 @@ def process_known_face(name, emp_id, frame, now, now_time, seen_known, CAMERA_NA
             now.strftime("%H:%M:%S"),
             CAMERA_NAME
         )
-        
+        # ✅ Trigger notification
+        from triger import trigger_notification
         trigger_notification(
             name=name,
             emp_id=emp_id,
             date=now.strftime("%Y-%m-%d"),
             time=now.strftime("%H:%M:%S"),
-            camera_name="Entry",
+            camera="Entry",
             event="ENTRY"
         )
  
