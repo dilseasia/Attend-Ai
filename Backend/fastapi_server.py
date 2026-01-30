@@ -66,6 +66,35 @@ from triger import send_approval_notification
 # Security
 security = HTTPBearer()
 
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+
+# Create logs directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
+
+# Create handlers
+file_handler = RotatingFileHandler(
+    'logs/api_logs.log', 
+    maxBytes=50*1024*1024,  # 50MB per file
+    backupCount=10  # Keep 10 old files
+)
+file_handler.setLevel(logging.INFO)
+
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+
+# Set format
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Configure root logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -146,6 +175,29 @@ USERS = {
     "2567": {"password": "Vivek@2567", "role": "employee"},
     "1131": {"password": "Yashu@1131", "role": "employee"},
 }
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    # Log incoming request
+    logging.info(f"🔵 REQUEST: {request.method} {request.url.path} | Client: {request.client.host if request.client else 'unknown'}")
+    
+    # Process request
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # Log successful response
+        logging.info(f"✅ RESPONSE: {request.method} {request.url.path} | Status: {response.status_code} | Time: {process_time:.2f}s")
+        return response
+        
+    except Exception as e:
+        process_time = time.time() - start_time
+        logging.error(f"❌ ERROR: {request.method} {request.url.path} | Error: {str(e)} | Time: {process_time:.2f}s")
+        raise
+
 
 
 # Initialize InsightFace (same as entry.py)
