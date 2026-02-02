@@ -743,8 +743,6 @@ async def list_all_requests(
 
 
 
-
-
 @app.post("/api/attendance-request/{request_id}/approve")
 async def approve_request(
     request_id: int,
@@ -780,40 +778,94 @@ async def approve_request(
                 detail=f"Request {request_id} not found"
             )
 
-        emp_id = result["emp_id"]
-        name = result["name"]
-        date = result["date"]
-        request_type = result["request_type"]
+        # 🔍 FETCH FULL REQUEST DETAILS (including in_time and out_time)
+        conn = None
+        try:
+            conn = get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT emp_id, name, request_type, date, in_time, out_time
+                FROM attendance_requests
+                WHERE id = %s
+            """, (request_id,))
+            
+            request_detail = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not request_detail:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Request {request_id} details not found"
+                )
+                
+        except Exception as db_error:
+            logging.error(f"❌ Error fetching request details: {db_error}")
+            if conn:
+                conn.close()
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to fetch request details"
+            )
+
+        emp_id = request_detail["emp_id"]
+        name = request_detail["name"]
+        date = str(request_detail["date"])
+        request_type = request_detail["request_type"]
+        in_time = request_detail.get("in_time")
+        out_time = request_detail.get("out_time")
 
         # 🟢 If approved → log attendance
         if approval.status == "approved":
             try:
                 if request_type == "wfh":
+                    # Log Entry with actual in_time
+                    entry_time = str(in_time) if in_time else "09:00:00"
+                    logging.info(f"Logging WFH Entry: {name} ({emp_id}) at {entry_time} on {date}")
                     log_attendance(
                         name=name,
                         emp_id=emp_id,
                         date=date,
-                        time=result.get("in_time") or "09:00:00",
-                        camera="WFH"
+                        time=entry_time,
+                        camera="Entry"
                     )
-
-                elif request_type == "manual_capture":
-                    if result.get("in_time"):
+                    
+                    # Log Exit with actual out_time
+                    if out_time:
+                        exit_time = str(out_time)
+                        logging.info(f"Logging WFH Exit: {name} ({emp_id}) at {exit_time} on {date}")
                         log_attendance(
                             name=name,
                             emp_id=emp_id,
                             date=date,
-                            time=result["in_time"],
-                            camera="Manual-Entry"
+                            time=exit_time,
+                            camera="Exit"
                         )
-
-                    if result.get("out_time"):
+                
+                elif request_type == "manual_capture":
+                    # Log Entry if in_time exists
+                    if in_time:
+                        entry_time = str(in_time)
+                        logging.info(f"Logging Manual Entry: {name} ({emp_id}) at {entry_time} on {date}")
                         log_attendance(
                             name=name,
                             emp_id=emp_id,
                             date=date,
-                            time=result["out_time"],
-                            camera="Manual-Exit"
+                            time=entry_time,
+                            camera="Entry"
+                        )
+                    
+                    # Log Exit if out_time exists
+                    if out_time:
+                        exit_time = str(out_time)
+                        logging.info(f"Logging Manual Exit: {name} ({emp_id}) at {exit_time} on {date}")
+                        log_attendance(
+                            name=name,
+                            emp_id=emp_id,
+                            date=date,
+                            time=exit_time,
+                            camera="Exit"
                         )
 
             except Exception as log_error:
@@ -844,7 +896,9 @@ async def approve_request(
             "status": approval.status,
             "emp_id": emp_id,
             "name": name,
-            "date": date
+            "date": date,
+            "in_time": str(in_time) if in_time else None,
+            "out_time": str(out_time) if out_time else None
         }
 
     except HTTPException as he:
