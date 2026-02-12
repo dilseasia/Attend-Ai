@@ -16,7 +16,8 @@ from triger import trigger_notification
 CAMERA_NAME = "Exit"
 RTSP_URL = "rtsp://moogle:Admin_123@10.8.21.47:554/video/live?channel=1&subtype=0"
 THRESHOLD = 0.5
-FRAME_INTERVAL = 0.9
+FRAME_INTERVAL = 1.0  # ✅ MATCHED: Same as entry.py
+SKIP_FRAMES = 2  # ✅ FIX #1: Increased from 2 to 5 (same as entry.py)
 UNKNOWN_COOLDOWN = 10
 UNKNOWN_FACE_MIN_AREA = 2000
 EXIT_COOLDOWN = 1 * 60
@@ -24,11 +25,9 @@ HEADLESS = True
 
 # ✅ OPTIMIZED: Performance settings
 MAX_DETECTION_SIZE = 480
-SKIP_FRAMES = 2  # Process every 3rd frame
-RTSP_RECONNECT_DELAY = 2
-RTSP_TIMEOUT = 5000
+RTSP_RECONNECT_DELAY = 3
+RTSP_TIMEOUT = 10000
 MAX_RECONNECT_ATTEMPTS = 5
-FRAME_SKIP_ON_ERROR = True
 CLEANUP_INTERVAL = 300
 
 # === INITIALIZE ===
@@ -57,22 +56,87 @@ def cosine_similarity(a, b):
 
 
 def create_rtsp_connection(rtsp_url, timeout=RTSP_TIMEOUT):
-    """Create an optimized RTSP connection"""
-    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+    """
+    ✅ IMPROVED: Create an optimized RTSP connection with better error handling
+    """
+    logging.info(f"🔗 Attempting to connect to {CAMERA_NAME} camera...")
     
-    # ✅ CRITICAL: Minimal buffering
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout)
-    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout)
+    # ✅ FIX 1: Use TCP transport instead of UDP (more reliable)
+    rtsp_url_tcp = rtsp_url
+    if "?" in rtsp_url:
+        rtsp_url_tcp = rtsp_url + "&tcp"
+    else:
+        rtsp_url_tcp = rtsp_url + "?tcp"
     
-    # ✅ Reduce resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Try multiple connection methods
+    connection_attempts = [
+        (rtsp_url_tcp, "TCP transport"),
+        (rtsp_url, "Default transport"),
+    ]
     
-    return cap
+    for attempt_url, method in connection_attempts:
+        logging.info(f"  Trying {method}...")
+        
+        try:
+            cap = cv2.VideoCapture(attempt_url, cv2.CAP_FFMPEG)
+            
+            # ✅ FIX 2: Set timeouts BEFORE opening
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout)
+            
+            # ✅ FIX 3: Minimal buffering to reduce latency
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # ✅ FIX 4: Lower resolution to reduce bandwidth
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 15)  # Lower FPS
+            
+            # ✅ FIX 5: Test if connection actually works
+            if cap.isOpened():
+                # Try to read a test frame with timeout
+                start_time = time.time()
+                ret, test_frame = cap.read()
+                elapsed = time.time() - start_time
+                
+                if ret and test_frame is not None:
+                    logging.info(f"  ✅ Connection successful via {method} (took {elapsed:.2f}s)")
+                    return cap
+                else:
+                    logging.warning(f"  ⚠️ Connection opened but couldn't read frame via {method}")
+                    cap.release()
+            else:
+                logging.warning(f"  ⚠️ Couldn't open connection via {method}")
+                cap.release()
+                
+        except Exception as e:
+            logging.warning(f"  ⚠️ Error with {method}: {e}")
+            continue
+    
+    # ✅ FIX 6: Try with GStreamer as fallback (if available)
+    try:
+        logging.info("  Trying GStreamer backend...")
+        gst_pipeline = (
+            f"rtspsrc location={rtsp_url} latency=0 ! "
+            "rtph264depay ! h264parse ! avdec_h264 ! "
+            "videoconvert ! appsink max-buffers=1 drop=true"
+        )
+        cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+        
+        if cap.isOpened():
+            ret, test_frame = cap.read()
+            if ret and test_frame is not None:
+                logging.info("  ✅ Connection successful via GStreamer")
+                return cap
+        cap.release()
+    except Exception as e:
+        logging.warning(f"  ⚠️ GStreamer not available: {e}")
+    
+    logging.error(f"❌ Failed to connect to camera after all attempts")
+    return None
 
 
-def load_known_faces(known_faces_dir="known_faces", use_alignment=True):
+def load_known_faces(known_faces_dir="known_faces"):
     """Load known faces with embeddings"""
     known_faces = {}
     known_embeddings = []
@@ -125,7 +189,7 @@ def load_known_faces(known_faces_dir="known_faces", use_alignment=True):
 
     logging.info(f"✅ Total loaded: {len(known_embeddings)} embeddings")
     
-    # ✅ CRITICAL: Convert to numpy array
+    # ✅ FIX #2: Convert to numpy array for vectorized operations
     if known_embeddings:
         known_embeddings = np.array(known_embeddings, dtype=np.float32)
     
@@ -217,9 +281,9 @@ def cleanup_old_cooldowns(cooldowns, current_time, max_age):
 
 def main_loop():
     """
-    ✅ OPTIMIZED: Main processing loop
+    ✅ OPTIMIZED: Main processing loop matching entry.py optimizations
     """
-    known_faces, known_embeddings = load_known_faces(use_alignment=True)
+    known_faces, known_embeddings = load_known_faces()
     
     if len(known_embeddings) == 0:
         logging.error("❌ No known faces loaded!")
@@ -240,17 +304,33 @@ def main_loop():
     total_faces_detected = 0
     total_known_matches = 0
     
-    # ✅ Frame skip counter
+    # ✅ FIX #1: Frame skip counter
     frame_counter = 0
 
-    cap = create_rtsp_connection(RTSP_URL)
+    # ✅ IMPROVED: Better initial connection with retry
+    cap = None
+    for attempt in range(MAX_RECONNECT_ATTEMPTS):
+        logging.info(f"Connection attempt {attempt + 1}/{MAX_RECONNECT_ATTEMPTS}...")
+        cap = create_rtsp_connection(RTSP_URL)
+        
+        if cap is not None and cap.isOpened():
+            logging.info(f"✅ Successfully connected to {CAMERA_NAME} camera")
+            break
+        
+        if attempt < MAX_RECONNECT_ATTEMPTS - 1:
+            wait_time = RTSP_RECONNECT_DELAY * (attempt + 1)
+            logging.warning(f"⚠️ Connection failed, waiting {wait_time}s before retry...")
+            time.sleep(wait_time)
     
-    if not cap.isOpened():
-        logging.error(f"❌ {CAMERA_NAME} camera not accessible.")
+    if cap is None or not cap.isOpened():
+        logging.error(f"❌ {CAMERA_NAME} camera not accessible after {MAX_RECONNECT_ATTEMPTS} attempts.")
         return
 
     logging.info(f"🎥 {CAMERA_NAME} camera running...")
 
+    # ✅ IMPROVED: Main loop with better error handling
+    consecutive_failures = 0
+    
     while True:
         ret, frame = cap.read()
         now = datetime.now()
@@ -258,35 +338,44 @@ def main_loop():
         
         total_frames += 1
 
-        if not ret:
-            logging.warning(f"⚠️ Frame read failed for {CAMERA_NAME}...")
+        if not ret or frame is None:
+            consecutive_failures += 1
+            logging.warning(f"⚠️ Frame read failed for {CAMERA_NAME} (failure #{consecutive_failures})...")
             
-            if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-                logging.error(f"❌ Max reconnection attempts reached.")
-                break
-            
-            if now_time - last_successful_read > 30:
-                logging.warning(f"⚠️ Camera unresponsive. Reconnecting...")
-                cap.release()
+            # ✅ IMPROVED: Reconnect logic
+            if consecutive_failures >= 3 or (now_time - last_successful_read > 15):
+                if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                    logging.error(f"❌ Max reconnection attempts reached.")
+                    break
+                
+                logging.warning(f"⚠️ Camera unresponsive. Reconnecting... (attempt {reconnect_attempts + 1})")
+                
+                if cap is not None:
+                    cap.release()
+                
                 time.sleep(RTSP_RECONNECT_DELAY)
                 cap = create_rtsp_connection(RTSP_URL)
-                reconnect_attempts += 1
-                last_successful_read = time.time()
+                
+                if cap is None or not cap.isOpened():
+                    reconnect_attempts += 1
+                    logging.error(f"❌ Reconnection failed")
+                    time.sleep(RTSP_RECONNECT_DELAY * 2)
+                    continue
+                else:
+                    logging.info(f"✅ Reconnection successful")
+                    reconnect_attempts = 0
+                    consecutive_failures = 0
+                    last_successful_read = time.time()
             
-            if FRAME_SKIP_ON_ERROR:
-                time.sleep(0.1)
-                continue
-            else:
-                time.sleep(RTSP_RECONNECT_DELAY)
-                cap.release()
-                cap = create_rtsp_connection(RTSP_URL)
-                reconnect_attempts += 1
-                continue
+            time.sleep(0.1)
+            continue
         
+        # ✅ Frame read successful
         reconnect_attempts = 0
+        consecutive_failures = 0
         last_successful_read = now_time
         
-        # ✅ CRITICAL: Skip frames
+        # ✅ FIX #1: Skip frames (same logic as entry.py)
         frame_counter += 1
         if frame_counter % (SKIP_FRAMES + 1) != 0:
             continue
@@ -318,27 +407,26 @@ def main_loop():
             total_faces_detected += len(faces)
 
         for face in faces:
+            # ✅ FIX #3: Direct embedding (no alignment, same as entry.py)
             emb = face.embedding
+            
             bbox = face.bbox.astype(int)
             name, emp_id = "Unknown", ""
             color = (0, 0, 255)
 
-            # ✅ CRITICAL: Vectorized similarity
+            # ✅ FIX #2: Vectorized similarity (same as entry.py)
             if len(known_embeddings) > 0:
                 similarities = np.dot(known_embeddings, emb) / (
                     np.linalg.norm(known_embeddings, axis=1) * np.linalg.norm(emb)
                 )
                 best_idx = int(np.argmax(similarities))
                 best_similarity = float(similarities[best_idx])
-            else:
-                best_similarity = 0
-                best_idx = -1
-            
-            if best_similarity > (1 - THRESHOLD):
-                name, emp_id = known_faces[best_idx]
-                color = (0, 255, 0)
-                total_known_matches += 1
-                logging.debug(f"Match: {name} (similarity: {best_similarity:.3f})")
+                
+                if best_similarity > (1 - THRESHOLD):
+                    name, emp_id = known_faces[best_idx]
+                    color = (0, 255, 0)
+                    total_known_matches += 1
+                    logging.debug(f"Match: {name} (similarity: {best_similarity:.3f})")
             
             x1, y1, x2, y2 = bbox
             label = f"{name} ({emp_id})" if name != "Unknown" else "Unknown"
@@ -374,7 +462,8 @@ def main_loop():
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
-    cap.release()
+    if cap is not None:
+        cap.release()
     if not HEADLESS:
         cv2.destroyAllWindows()
     
@@ -382,4 +471,9 @@ def main_loop():
 
 
 if __name__ == "__main__":
-    main_loop()
+    try:
+        main_loop()
+    except KeyboardInterrupt:
+        logging.info("🛑 Program stopped by user")
+    except Exception as e:
+        logging.error(f"❌ Fatal error: {e}", exc_info=True)
