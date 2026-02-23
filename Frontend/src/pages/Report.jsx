@@ -52,10 +52,20 @@ import {
 } from "recharts";
 
 
+const HOUR_CONFIG = {
+  // Red (Half Day) - Hours below this threshold
+  HALF_DAY_THRESHOLD: 4,
+  
+  // Green (Full Day) - Both conditions must be met
+  FULL_DAY_TOTAL: 9,           // Total hours (first entry to last exit)
+  FULL_DAY_OFFICE: 8,          // Office hours (entry to exit camera times)
+  
+  // Yellow (Short Day) - Automatically applies to hours between Half and Full
+};
 
 
 // Configuration
-const BASE_URL = "http://10.8.11.183:8000";
+const BASE_URL = "http://10.8.21.51:8000";
 const LOGS_PER_BATCH = 100;
 const ITEMS_PER_PAGE = 5;
 
@@ -153,6 +163,8 @@ const ErrorDisplay = ({ message }) => (
     </div>
   </div>
 );
+
+
 
 // Employee Header
 const EmployeeHeader = ({ employee }) => {
@@ -568,6 +580,7 @@ const DayLogsCard = ({ date, logs, employee, expandedDates, onToggleExpand, onIm
             <span className="text-xs text-gray-500 ml-2">({sortedLogs.length} logs)</span>
           </div>
         </div>
+        
         <div className="flex items-center gap-2">
           <FiClock className="text-gray-500 text-sm" />
           <span className={`font-semibold ${
@@ -680,8 +693,37 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
     monday.setDate(today.getDate() - day);
     return monday.toISOString().slice(0, 10);
   });
-
   
+  // Add this state to store attendance types for all dates in weekly/monthly view
+  const [dateAttendanceTypes, setDateAttendanceTypes] = useState({});
+  // Add this function to fetch attendance types for multiple dates
+  const fetchMultipleDateAttendanceTypes = useCallback(async (dates) => {
+    if (!dates.length || !employeeId) return;
+    
+    console.log('🔍 Fetching attendance types for dates:', dates);
+    
+    try {
+      const promises = dates.map(date => 
+        fetch(`${BASE_URL}/api/logs/by-type?date=${date}&emp_id=${employeeId}`)
+          .then(res => res.json())
+      );
+      
+      const results = await Promise.all(promises);
+      const types = {};
+      
+      results.forEach((data, idx) => {
+        if (data.success) {
+          types[dates[idx]] = data.status;
+          console.log(`📅 ${dates[idx]} → ${data.status}`);
+        }
+      });
+      
+      setDateAttendanceTypes(types);
+      console.log('✅ Attendance types loaded:', types);
+    } catch (err) {
+      console.error("❌ Error fetching multiple attendance types:", err);
+    }
+  }, [employeeId]);
   
 
   const [photoPreview, setPhotoPreview] = useState({ url: "", time: "", type: "" });
@@ -704,7 +746,94 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
 
   
 
-  
+  // Add this state at the top of AnalyticsModal (around line 777)
+  const [attendanceType, setAttendanceType] = useState(null);
+
+  // Add this useEffect right after the state declaration
+  useEffect(() => {
+    const fetchAttendanceType = async () => {
+      // Check prerequisites
+      if (!isOpen) {
+        console.log('⏭️ Modal not open, skipping fetch');
+        return;
+      }
+      if (reportType !== 'daily') {
+        console.log('⏭️ Not daily report, skipping fetch. Current type:', reportType);
+        return;
+      }
+      if (!selectedDate) {
+        console.log('⏭️ No date selected, skipping fetch');
+        return;
+      }
+      if (!employeeId) {
+        console.log('⏭️ No employee ID, skipping fetch');
+        return;
+      }
+      
+      console.log('🔍 ===== FETCHING ATTENDANCE TYPE =====');
+      console.log('📅 Date:', selectedDate);
+      console.log('👤 Employee ID:', employeeId);
+      
+      try {
+        const params = { date: selectedDate, emp_id: employeeId };
+        const query = new URLSearchParams(params).toString();
+        const url = `${BASE_URL}/api/logs/by-type?${query}`;
+        
+        console.log('📡 Full API URL:', url);
+        
+        const res = await fetch(url);
+        
+        console.log('📨 Response Status:', res.status);
+        console.log('📨 Response OK:', res.ok);
+        
+        const data = await res.json();
+        
+        console.log('✅ ===== API RESPONSE =====');
+        console.log('📦 Full Response:', JSON.stringify(data, null, 2));
+        console.log('✔️ Success:', data.success);
+        console.log('📊 Status:', data.status);
+        console.log('📅 Date:', data.date);
+        
+        if (data.success) {
+          setAttendanceType(data.status);
+          console.log('🎯 ===== ATTENDANCE TYPE SET =====');
+          console.log('💾 State updated to:', data.status);
+          console.log('🏠 Is WFH?', data.status === 'wfh');
+          console.log('🏢 Is Office?', data.status === 'office');
+          console.log('❌ Is Absent?', data.status === 'absent');
+        } else {
+          console.warn('⚠️ API returned success: false');
+          setAttendanceType(null);
+        }
+      } catch (err) {
+        console.error("❌ ===== ERROR FETCHING ATTENDANCE =====");
+        console.error("❌ Error:", err);
+        console.error("❌ Message:", err.message);
+        console.error("❌ Stack:", err.stack);
+        setAttendanceType(null);
+      }
+    };
+
+    // Call the function
+    fetchAttendanceType();
+    
+    // Log whenever dependencies change
+    console.log('🔄 Dependencies changed:', {
+      isOpen,
+      reportType,
+      selectedDate,
+      employeeId
+    });
+    
+  }, [isOpen, reportType, selectedDate, employeeId]);
+
+  // Log whenever attendanceType state changes
+  useEffect(() => {
+    console.log('🎨 ===== ATTENDANCE TYPE STATE CHANGED =====');
+    console.log('Current value:', attendanceType);
+    console.log('Report type:', reportType);
+    console.log('Selected date:', selectedDate);
+  }, [attendanceType, reportType, selectedDate]);
 
 
 
@@ -722,38 +851,50 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
       return h + m / 60;
     };
 
-    const getColorByHours = (total_hours, totalHours) => {
-    const parseHours = (value) => {
-      if (value == null) return 0;
-      if (typeof value === "number") return value;
+    const getColorByHours = (total_hours, totalHours, attendanceType = null) => {
+  const parseHours = (value) => {
+    if (value == null) return 0;
+    if (typeof value === "number") return value;
 
-      const str = String(value);
+    const str = String(value);
 
-      const hMatch = str.match(/(\d+(?:\.\d+)?)h/);
-      const mMatch = str.match(/(\d+)m/);
+    const hMatch = str.match(/(\d+(?:\.\d+)?)h/);
+    const mMatch = str.match(/(\d+)m/);
 
-      const hours = hMatch ? parseFloat(hMatch[1]) : 0;
-      const minutes = mMatch ? parseInt(mMatch[1], 10) / 60 : 0;
+    const hours = hMatch ? parseFloat(hMatch[1]) : 0;
+    const minutes = mMatch ? parseInt(mMatch[1], 10) / 60 : 0;
 
-      return hours + minutes;
-    };
-
-    const total = parseHours(total_hours);
-    const office = parseHours(totalHours);
-
-    // 🔴 RED
-    if (total < 4 || office < 4) {
-      return { stroke: "#EF4444", fill: "#FECACA", label: "Half" };
-    }
-
-    // 🟢 GREEN (STRICT)
-    if (total >= 9 && office >=8) {
-      return { stroke: "#10B981", fill: "#D1FAE5", label: "Full" };
-    }
-
-    // 🟡 YELLOW
-    return { stroke: "#F59E0B", fill: "#FFFBEB", label: "Short" };
+    return hours + minutes;
   };
+
+  const total = parseHours(total_hours);
+  const office = parseHours(totalHours);
+
+  // 🔵 BLUE (WFH) - Check this FIRST before hour-based logic
+  if (attendanceType === 'wfh') {
+    // Still apply hour-based coloring but in blue shades
+    if (total < HOUR_CONFIG.HALF_DAY_THRESHOLD || office < HOUR_CONFIG.HALF_DAY_THRESHOLD) {
+      return { stroke: "#3B82F6", fill: "#DBEAFE", label: "WFH - Half" };
+    }
+    if (total >= HOUR_CONFIG.FULL_DAY_TOTAL && office >= HOUR_CONFIG.FULL_DAY_OFFICE) {
+      return { stroke: "#2563EB", fill: "#BFDBFE", label: "WFH - Full" };
+    }
+    return { stroke: "#60A5FA", fill: "#E0F2FE", label: "WFH - Short" };
+  }
+
+  // 🔴 RED (Half Day)
+  if (total < HOUR_CONFIG.HALF_DAY_THRESHOLD || office < HOUR_CONFIG.HALF_DAY_THRESHOLD) {
+    return { stroke: "#EF4444", fill: "#FECACA", label: "Half" };
+  }
+
+  // 🟢 GREEN (Full Day - STRICT: Both conditions must be met)
+  if (total >= HOUR_CONFIG.FULL_DAY_TOTAL && office >= HOUR_CONFIG.FULL_DAY_OFFICE) {
+    return { stroke: "#10B981", fill: "#D1FAE5", label: "Full" };
+  }
+
+  // 🟡 YELLOW (Short Day)
+  return { stroke: "#F59E0B", fill: "#FFFBEB", label: "Short" };
+};
   
   const toMinutes = (str = "0h 0m") => {
     const h = parseInt(str.match(/(\d+)h/)?.[1] || 0);
@@ -818,12 +959,12 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
   }, [isOpen, reportType, weekStart, selectedMonth, employeeId]);
   
 
-  const calcProgress = (totalStr, officeStr) => {
+    const calcProgress = (totalStr, officeStr) => {
     const totalMin = toMinutes(totalStr);
     const officeMin = toMinutes(officeStr);
 
-    const OFFICE_TARGET = 8 * 60; // 480
-    const TOTAL_TARGET = 9 * 60;  // 540
+    const OFFICE_TARGET = HOUR_CONFIG.FULL_DAY_OFFICE * 60;  // Convert hours to minutes
+    const TOTAL_TARGET = HOUR_CONFIG.FULL_DAY_TOTAL * 60;    // Convert hours to minutes
 
     // ✅ 100% ONLY if BOTH true
     if (officeMin >= OFFICE_TARGET && totalMin >= TOTAL_TARGET) {
@@ -1016,7 +1157,7 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
         if (reportType === "monthly") params.month = selectedMonth;
 
         const res = await axios.get(
-          "http://10.8.11.183:8000/api/logs/total-hours-entry-exit",
+          "http://10.8.21.51:8000/api/logs/total-hours-entry-exit",
           { params }
         );
 
@@ -1068,7 +1209,15 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
     }
   }, [photoPreview]);
 
-  
+  // Add useEffect to fetch attendance types for weekly/monthly views
+  useEffect(() => {
+    if (isOpen && (reportType === 'weekly' || reportType === 'monthly')) {
+      const dates = dailyHours.map(item => item.date).filter(Boolean);
+      if (dates.length > 0) {
+        fetchMultipleDateAttendanceTypes(dates);
+      }
+    }
+  }, [isOpen, reportType, dailyHours, fetchMultipleDateAttendanceTypes]);
 
   const empImage =
     employee?.image_url
@@ -1094,7 +1243,6 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
 
     return dailyHours.map((item) => {
       const date = item.date || "N/A";
-
       const totalHoursStr = item.working_hours || "0h 0m";
 
       const matchedDay =
@@ -1105,18 +1253,24 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
         matchedDay?.working_hours ||
         "8h 0m";
 
+      // Get attendance type for this date (only for weekly/monthly)
+      const dayAttendanceType = (reportType === 'weekly' || reportType === 'monthly')
+        ? dateAttendanceTypes[date] || null
+        : null;
+
       const colorResult = getColorByHours(
         totalHoursStr,
-        officeHoursStr
+        officeHoursStr,
+        dayAttendanceType // Pass attendance type here
       );
 
       return {
         date,
         hoursNum: parseHoursToNumber(totalHoursStr),
-        color: colorResult?.stroke || "#CBD5E1", // 🛡 safety fallback
+        color: colorResult?.stroke || "#CBD5E1",
       };
     });
-  }, [dailyHours, analyticsData]);
+  }, [dailyHours, analyticsData, reportType, dateAttendanceTypes]);
 
 
   
@@ -1165,8 +1319,86 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
     );
   };
   
-  
-  
+  const [absentWeekdays, setAbsentWeekdays] = useState(0);
+  const [weekendPresentDays, setWeekendPresentDays] = useState(0);
+  // WFH count derived from dateAttendanceTypes
+  const wfhDays = useMemo(
+    () => Object.values(dateAttendanceTypes).filter(t => t === 'wfh').length,
+    [dateAttendanceTypes]
+  );
+
+  useEffect(() => {
+    if (reportType === 'daily' || !isOpen || !employeeId) return;
+
+    const fetchAbsentAndWeekend = async () => {
+      try {
+        const params = {
+          emp_id: employeeId,
+          report_type: reportType,
+          limit: 1000,
+          offset: 0,
+        };
+
+        const query = new URLSearchParams(params).toString();
+        const res = await fetch(`${BASE_URL}/api/calculate-working-hours-full?${query}`);
+        const data = await res.json();
+
+        const rows = data.working_hours || [];
+
+        // Build range to filter rows client-side
+        let rangeStart = '';
+        let rangeEnd = '';
+
+        if (reportType === 'weekly') {
+          rangeStart = weekStart;
+          const endDate = new Date(weekStart + 'T00:00:00');
+          endDate.setDate(endDate.getDate() + 6);
+          rangeEnd = endDate.toISOString().slice(0, 10);
+        } else if (reportType === 'monthly') {
+          rangeStart = selectedMonth + '-01';
+          const [y, m] = selectedMonth.split('-').map(Number);
+          const lastDay = new Date(y, m, 0);
+          rangeEnd = lastDay.toISOString().slice(0, 10);
+        }
+
+        let absent = 0;
+        let weekendPresent = 0;
+
+        rows.forEach(row => {
+          if (!row.date) return;
+
+          // Filter to only rows within the selected range
+          if (row.date < rangeStart || row.date > rangeEnd) return;
+
+          const jsDay = new Date(row.date + 'T00:00:00').getDay();
+          const isWeekend = jsDay === 0 || jsDay === 6;
+          const isHoliday = !!HOLIDAYS[row.date];
+          const isAbsent = row.status === 'Absent';
+          const hasHours = row.working_hours &&
+            row.working_hours !== '0h 0m' &&
+            row.working_hours !== 'Absent';
+
+          if (isWeekend && hasHours) {
+            weekendPresent++;
+          }
+
+          if (!isWeekend && !isHoliday && isAbsent) {
+            absent++;
+          }
+        });
+
+        setAbsentWeekdays(absent);
+        setWeekendPresentDays(weekendPresent);
+
+      } catch (err) {
+        console.error('Error fetching absent/weekend data:', err);
+        setAbsentWeekdays(0);
+        setWeekendPresentDays(0);
+      }
+    };
+
+    fetchAbsentAndWeekend();
+  }, [isOpen, reportType, employeeId, weekStart, selectedMonth]);
 
 
   return (
@@ -1401,80 +1633,104 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                         </div>
                       </div>
 
-                      {/* RIGHT: METRIC CARDS */}
-                      <div className="flex items-center gap-3 flex-wrap">
-                          {/* Total Hours */}
-                          <div className="px-5 py-3 bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-200 rounded-xl shadow-sm flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-indigo-200 flex items-center justify-center">
-                              <span className="text-indigo-700 text-lg">⏱</span>
-                            </div>
-
+                      {/* RIGHT: METRIC CARDS - REORGANIZED */}
+                      {/* RIGHT: METRIC CARDS - REORGANIZED */}
+                      <div className="flex items-center gap-2 justify-end overflow-x-auto">
+                        {/* Work Mode - daily only */}
+                        {reportType === 'daily' && attendanceType && (
+                          <div className={`px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-.5 border flex-shrink-0 ${
+                            attendanceType === 'wfh' 
+                              ? 'bg-blue-50 border-blue-200' 
+                              : attendanceType === 'office'
+                              ? 'bg-green-50 border-green-200'
+                              : 'bg-gray-50 border-gray-200'
+                          }`}>
+                            <span className="text-xl">
+                              {attendanceType === 'wfh' ? '🏠' : attendanceType === 'office' ? '🏢' : '❌'}
+                            </span>
                             <div>
-                              <div className="text-[11px] text-slate-600 uppercase tracking-wide">
-                                Total Hours
-                              </div>
-
-                              {/* USE ONLY API VALUE */}
-                              <div className="text-2xl font-extrabold text-indigo-800 leading-none">
-                                {(() => {
-                                  if (!totalHoursResult) return "0h 0m";
-
-                                  // DAILY → pick working_hours of selected date
-                                  if (reportType === "daily") {
-                                    const day = totalHoursResult.daily_hours?.find(
-                                      d => d.date === selectedDate
-                                    );
-                                    return day?.working_hours || "0h 0m";
-                                  }
-
-                                  // WEEKLY / MONTHLY → use total_hours from backend
-                                  return totalHoursResult.total_hours || "0h 0m";
-                                })()}
-                              </div>
-                              
-
-                              <div className="text-[10px] text-indigo-600 mt-0.5">
-                                {reportType === "daily"
-                                  ? ""
-                                  : ""}
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wide">Mode</div>
+                              <div className={`text-base font-extrabold leading-none ${
+                                attendanceType === 'wfh' ? 'text-blue-800' 
+                                : attendanceType === 'office' ? 'text-green-800' 
+                                : 'text-gray-800'
+                              }`}>
+                                {attendanceType === 'wfh' ? 'WFH' : attendanceType === 'office' ? 'Office' : 'Absent'}
                               </div>
                             </div>
                           </div>
+                        )}
 
-
-
-                          {/* Office Hours */}
-                          <div className="px-5 py-3 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl shadow-sm flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-full bg-purple-200 flex items-center justify-center">
-                            <span className="text-purple-700 text-lg">🕒</span>
-                          </div>
+                        {/* Total Hours */}
+                        <div className="px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl shadow-sm flex items-center gap-2.5 flex-shrink-0">
+                          <span className="text-xl">⏱</span>
                           <div>
-                            <div className="text-[11px] text-slate-600 uppercase tracking-wide">
-                              Office Hours
-                            </div>
-                            <div className="text-2xl font-extrabold text-purple-800 leading-none">{totalHours}</div>
-                            <div className="text-[10px] text-purple-600 mt-0.5">
-                              {/* Worked in selected {reportType} */}
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wide">Total Hours</div>
+                            <div className="text-base font-extrabold text-indigo-800 leading-none">
+                              {(() => {
+                                if (!totalHoursResult) return "0h 0m";
+                                if (reportType === "daily") {
+                                  const day = totalHoursResult.daily_hours?.find(d => d.date === selectedDate);
+                                  return day?.working_hours || "0h 0m";
+                                }
+                                return totalHoursResult.total_hours || "0h 0m";
+                              })()}
                             </div>
                           </div>
                         </div>
 
-                                                  
-                          
+                        {/* Office Hours */}
+                        <div className="px-4 py-2.5 bg-purple-50 border border-purple-200 rounded-xl shadow-sm flex items-center gap-2.5 flex-shrink-0">
+                          <span className="text-xl">🕒</span>
+                          <div>
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wide">Office Hours</div>
+                            <div className="text-base font-extrabold text-purple-800 leading-none">{totalHours}</div>
+                          </div>
+                        </div>
 
-
-                        {/* Days count (not daily report) */}
+                        {/* Present Days - not daily */}
                         {reportType !== "daily" && (
-                          <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm shadow-sm flex items-center gap-3">
-                            <div className="w-10 h-10 bg-amber-200 rounded-xl flex items-center justify-center">
-                              <span className="text-amber-700 text-lg">📅</span>
-                            </div>
+                          <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl shadow-sm flex items-center gap-2.5 flex-shrink-0">
+                            <span className="text-xl">📅</span>
                             <div>
-                              <div className="text-[11px] text-slate-500">Days</div>
-                              <div className="font-bold text-slate-800">{totalDays}</div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wide">Present</div>
+                              <div className="text-base font-extrabold text-amber-800 leading-none">{totalDays} days</div>
                             </div>
                           </div>
                         )}
+
+                        {/* Absent Days - not daily */}
+                        {reportType !== "daily" && (
+                          <div className="px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl shadow-sm flex items-center gap-2.5 flex-shrink-0">
+                            <span className="text-xl">❌</span>
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wide">Absent</div>
+                              <div className="text-base font-extrabold text-red-800 leading-none">{absentWeekdays} days</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Weekend Present - not daily */}
+                        {reportType !== "daily" && (
+                          <div className="px-4 py-2.5 bg-violet-50 border border-violet-200 rounded-xl shadow-sm flex items-center gap-2.5 flex-shrink-0">
+                            <span className="text-xl">🌟</span>
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wide">Weekend</div>
+                              <div className="text-base font-extrabold text-violet-800 leading-none">{weekendPresentDays} days</div>
+                            </div>
+                          </div>
+                        )}
+                        {/* WFH Days - not daily */}
+                        {reportType !== "daily" && (
+                          <div className="px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl shadow-sm flex items-center gap-2.5 flex-shrink-0">
+                            <span className="text-xl">🏠</span>
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wide">WFH</div>
+                              <div className="text-base font-extrabold text-blue-800 leading-none">{wfhDays} days</div>
+                            </div>
+                          </div>
+                        )}
+
                       </div>
                     </div>
                   </motion.div>
@@ -1494,12 +1750,13 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                             {/* Get data for selected date */}
                             {(() => {
                               const item = analyticsData.daily_hours?.find((x) => x.date === selectedDate) || {};
-                              const officeHoursStr= item.working_hours || analyticsData.total_hours || "0h 0m"; // First entry to last exit
+                              const officeHoursStr= item.working_hours || analyticsData.total_hours || "0h 0m";
                               const totalHoursStr =
                               totalHoursResult?.total_hours ||
                               totalHoursResult?.working_hours ||
                               "0h 0m";
-                              const colorResult = getColorByHours(totalHoursStr, officeHoursStr);
+                              const colorResult = getColorByHours(totalHoursStr, officeHoursStr, attendanceType);  // ✅ ADD attendanceType
+                                                          
                               
                               return (
                                 <>
@@ -1524,6 +1781,7 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                               );
                             })()}
                           </div>
+                          
 
                           {/* RIGHT: Metrics Table */}
                           <div className="flex-1 max-w-xs space-y-3 text-sm">
@@ -1537,7 +1795,7 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                               "0h 0m";
 
                               console.log("Total Hours (API):", totalHoursStr);
-                              const colorResult = getColorByHours(totalHoursStr, officeHoursStr);
+                              const colorResult = getColorByHours(totalHoursStr, officeHoursStr, attendanceType);  // ✅ ADD attendanceType
                               const progress = calcProgress(totalHoursStr, officeHoursStr);
 
 
@@ -1699,8 +1957,72 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                         </div>
 
                         {/* BarChart: Daily vs target */}
-
                         {/* BarChart: Daily vs target */}
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                          {/* Header with inline legend */}
+                          <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+                            <div>
+                              <p className="text-xs text-slate-500 uppercase tracking-wide">
+                                Comparison
+                              </p>
+                              <p className="text-sm font-semibold text-slate-900">
+                                Daily vs target
+                              </p>
+                            </div>
+                            
+                            {/* ✅ NEW: Color Legend - INLINE with title */}
+                            <div className="flex flex-wrap gap-2 text-[10px] items-center">
+
+                              {/* Green - Full Day */}
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-3 h-3 rounded-sm bg-[#10B981] flex-shrink-0"></div>
+                                <span className="text-slate-600">Full Day (≥9h total + ≥8h office)</span>
+                              </div>
+                              
+                              {/* Yellow - Short Day */}
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-3 h-3 rounded-sm bg-[#F59E0B] flex-shrink-0"></div>
+                                <span className="text-slate-600">Short Day (4-9h)</span>
+                              </div>
+
+                              {/* Red - Half Day */}
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-3 h-3 rounded-sm bg-[#EF4444] flex-shrink-0"></div>
+                                <span className="text-slate-600">Half Day (&lt;4h)</span>
+                              </div>
+                              
+                              
+                              
+                              {/* Blue - WFH */}
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-3 h-3 rounded-sm bg-[#3B82F6] flex-shrink-0"></div>
+                                <span className="text-slate-600">WFH</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Chart */}
+                          <div style={{ width: "100%", height: 220 }}>
+                            <ResponsiveContainer>
+                              <BarChart data={chartData}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                                <YAxis domain={[0, 10]} tick={{ fontSize: 11 }} />
+                                <Tooltip formatter={(value) => `${value} hrs`} />
+
+                                <Bar dataKey="hoursNum" barSize={18} animationDuration={700}>
+                                  {chartData.map((entry, idx) => (
+                                    <Cell
+                                      key={`cell-${idx}`}
+                                      fill={entry.color}
+                                    />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                        {/* BarChart: Daily vs target
                         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                           <div className="flex items-center justify-between mb-3">
                             <div>
@@ -1732,7 +2054,7 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                               </BarChart>
                             </ResponsiveContainer>
                           </div>
-                        </div>
+                        </div> */}
 
                       </div>
 
@@ -1758,7 +2080,19 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                             const officeHoursStr =
                               matchedDay.office_hours || matchedDay.working_hours || "8h 0m";
 
-                            const colorResult = getColorByHours(totalHoursStr, officeHoursStr);
+                            // Get attendance type for this specific date (only for weekly/monthly)
+                            const dayType = (reportType === 'weekly' || reportType === 'monthly')
+                              ? dateAttendanceTypes[date] || null
+                              : null;
+
+                            const isWFH = dayType === 'wfh';
+
+                            const colorResult = getColorByHours(
+                              totalHoursStr, 
+                              officeHoursStr, 
+                              dayType
+                            );
+                            
                             const progress = calcProgress(totalHoursStr, officeHoursStr);
 
                             // Get first entry and last exit photos for this date
@@ -1771,10 +2105,24 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                               : null;
 
                             return (
-                              <div key={i} className="p-3 rounded-xl border border-slate-100 hover:shadow-md transition">
+                              <div 
+                                key={i} 
+                                className={`p-3 rounded-xl border transition ${
+                                  isWFH 
+                                    ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-200' 
+                                    : 'border-slate-100 hover:shadow-md'
+                                }`}
+                              >
                                 <div className="flex items-center justify-between mb-2">
                                   <div>
-                                    <p className="text-sm font-semibold text-slate-900">{item.date}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-semibold text-slate-900">{item.date}</p>
+                                      {isWFH && (
+                                        <span className="px-2 py-0.5 text-[10px] font-bold text-blue-700 bg-blue-200 rounded-full">
+                                          🏠 WFH
+                                        </span>
+                                      )}
+                                    </div>
                                     <p className="text-xs font-bold text-slate-900">{officeHoursStr}</p>
                                   </div>
                                   <div className="text-right">
@@ -1838,7 +2186,7 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                                   </div>
                                 </div>
 
-                                {/* Progress Bar */}
+                                {/* Progress Bar - Use color from colorResult */}
                                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                                   <motion.div
                                     initial={{ width: 0 }}
@@ -1866,8 +2214,6 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
                                     <span className="font-medium">{colorResult.label}</span>
                                   </span>
                                 </div>
-
-
                               </div>
                             );
                           }) || (
