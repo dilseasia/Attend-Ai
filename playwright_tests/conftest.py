@@ -3,7 +3,7 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 
-BASE_URL = 'http://10.8.21.51:8000/api'
+BASE_URL = ''
 
 
 class _WrappedContext:
