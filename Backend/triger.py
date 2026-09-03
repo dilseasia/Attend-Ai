@@ -299,6 +299,91 @@ def trigger_notification(name, emp_id, date, time, camera, event="ENTRY"):
 
 
 # ---------------------------
+# Send approval/rejection notification
+# ---------------------------
+def send_approval_notification(emp_id, name, request_type, date, status, remarks=None):
+    """
+    Send push notification to employee when their attendance request is approved/rejected.
+
+    Args:
+        emp_id: Employee ID
+        name: Employee name
+        request_type: 'wfh' or 'manual_capture'
+        date: Date string (YYYY-MM-DD)
+        status: 'approved' or 'rejected'
+        remarks: Optional admin remarks
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        # Fetch all device tokens for this employee
+        cursor.execute("SELECT fcm_token FROM device_tokens WHERE emp_id=%s", (emp_id,))
+        tokens = cursor.fetchall()
+
+        if not tokens:
+            print(f"⚠️ No device tokens found for employee ID: {emp_id}")
+            return
+
+        # Prepare notification content
+        status_emoji = "✅" if status == "approved" else "❌"
+        req_label = "WFH" if request_type == "wfh" else "Manual Capture"
+        title = f"{status_emoji} Request {status.capitalize()}"
+        body = f"Hi {name}, your {req_label} request for {date} has been {status}."
+        if remarks:
+            body += f" Remarks: {remarks}"
+
+        data_payload = {
+            "type": "request_approval",
+            "status": status,
+            "emp_id": emp_id,
+            "request_type": request_type,
+            "date": date,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        print(f"\n{'='*60}")
+        print(f"📨 Approval Notification for {name} ({emp_id})")
+        print(f"📋 {title}")
+        print(f"📋 {body}")
+        print(f"{'='*60}\n")
+
+        success_count = 0
+        failed_tokens = []
+
+        for idx, t in enumerate(tokens, 1):
+            token = t[0]
+            print(f"\n--- Token {idx}/{len(tokens)} ---")
+            if send_push_fcm_v1(token, title, body, data_payload):
+                success_count += 1
+            else:
+                failed_tokens.append(token)
+
+        # Clean up invalid tokens
+        if failed_tokens:
+            for token in failed_tokens:
+                cleanup_invalid_token(cursor, conn, emp_id, token)
+
+        # Log notification
+        cursor.execute("""
+            INSERT INTO notification_logs (emp_id, title, body)
+            VALUES (%s, %s, %s)
+        """, (emp_id, title, body))
+        conn.commit()
+
+        print(f"✅ Approval notification sent to {success_count}/{len(tokens)} devices")
+
+    except psycopg2.Error as e:
+        print(f"❌ Database error in send_approval_notification: {e}")
+    except Exception as e:
+        print(f"⚠️ Error in send_approval_notification: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ---------------------------
 # Test and verify setup
 # ---------------------------
 if __name__ == "__main__":

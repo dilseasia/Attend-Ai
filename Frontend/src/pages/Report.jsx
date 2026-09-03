@@ -52,6 +52,8 @@ import {
 } from "recharts";
 
 
+import { API_BASE_URL } from "../config";
+
 const HOUR_CONFIG = {
   // Red (Half Day) - Hours below this threshold
   HALF_DAY_THRESHOLD: 4,
@@ -65,7 +67,7 @@ const HOUR_CONFIG = {
 
 
 // Configuration
-const BASE_URL = "http://10.8.21.51:8000";
+const BASE_URL = API_BASE_URL;
 const LOGS_PER_BATCH = 100;
 const ITEMS_PER_PAGE = 5;
 
@@ -1157,7 +1159,7 @@ const AnalyticsModal = ({ isOpen, onClose, reportType, employeeId, employee }) =
         if (reportType === "monthly") params.month = selectedMonth;
 
         const res = await axios.get(
-          "http://10.8.21.51:8000/api/logs/total-hours-entry-exit",
+          `${BASE_URL}/api/logs/total-hours-entry-exit`,
           { params }
         );
 

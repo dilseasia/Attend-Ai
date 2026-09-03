@@ -3,6 +3,7 @@ import { FiBell, FiUser, FiLogOut, FiClock } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
 export default function Header() {
   const [logs, setLogs] = useState([]);
@@ -64,7 +65,7 @@ export default function Header() {
 
   const fetchLogs = async () => {
     try {
-      const res = await axios.get("http://10.8.21.51:8000/api/logs");
+      const res = await axios.get(`${API_BASE_URL}/api/logs`);
       const newLogs = res.data.logs.slice(0, 5);
       setLogs(newLogs);
 
@@ -86,7 +87,7 @@ export default function Header() {
   const fetchRequests = async () => {
     try {
       const AUTH_TOKEN = 'TOKEN_admin';
-      const res = await axios.get("http://10.8.21.51:8000/api/attendance-request/all?status=pending&limit=10", {
+      const res = await axios.get(`${API_BASE_URL}/api/attendance-request/all?status=pending&limit=10`, {
         headers: {
           'Authorization': `Bearer ${AUTH_TOKEN}`
         }

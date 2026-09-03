@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Calendar, Camera, Download, RefreshCw, Users, Eye, X, Clock } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export default function Attendance() {
   const [logs, setLogs] = useState([]);
@@ -17,7 +18,7 @@ export default function Attendance() {
     setLoading(true);
     
     // Fetch logs
-    fetch('http://10.8.11.183:8000/api/logs')
+    fetch(`${API_BASE_URL}/api/logs`)
       .then(res => res.json())
       .then(data => {
         setLogs(data.logs || []);
@@ -25,7 +26,7 @@ export default function Attendance() {
       .catch(err => console.error('Failed to fetch logs:', err));
     
     // Fetch employees for photos
-    fetch('http://10.8.11.183:8000/api/employees')
+    fetch(`${API_BASE_URL}/api/employees`)
       .then(res => res.json())
       .then(data => {
         setEmployees(data.employees || []);
@@ -80,7 +81,7 @@ export default function Attendance() {
     
     try {
       const res = await fetch(
-        `http://10.8.11.183:8000/api/employee-entries-with-photos?emp_id=${empId}&type=all&date=${date}`
+        `${API_BASE_URL}/api/employee-entries-with-photos?emp_id=${empId}&type=all&date=${date}`
       );
       const data = await res.json();
       

@@ -9,10 +9,11 @@ from ultralytics import YOLO
 
 # ---------- CONFIG ----------
 CAMERA_NAME = "Exit"
-RTSP_URL = "rtsp://admin:admin123@10.8.21.47:554/cam/realmonitor?channel=1&subtype=0"
+RTSP_URL = "rtsp://moogle:Admin_123@10.8.21.47:554/video/live?channel=1&subtype=0"
 
-FRAME_INTERVAL = 1
-MOTION_THRESHOLD = 4000     # tune for your camera/resolution
+FRAME_INTERVAL = 5          # ✅ 1→5: process every 5 seconds (was 1)
+YOLO_WIDTH     = 480        # ✅ Resize before YOLO (was full HD)
+MOTION_THRESHOLD = 4000
 OBJECT_COOLDOWN = 10
 HEADLESS = True
 SAVE_OBJECTS = True
@@ -78,15 +79,19 @@ try:
             continue
         last_frame_time = ts
 
-        # motion mask
-        mask = fgbg.apply(frame)
+        # ✅ Resize frame before YOLO — much faster on CPU
+        h, w = frame.shape[:2]
+        scale = YOLO_WIDTH / w
+        small_frame = cv2.resize(frame, (YOLO_WIDTH, int(h * scale)))
 
-        # YOLO detections
+        # motion mask on small frame
+        mask = fgbg.apply(small_frame)
+
+        # YOLO detections on small frame
         try:
-            # prune old cooldowns
             object_cooldowns = {k:v for k,v in object_cooldowns.items() if ts - v < OBJECT_COOLDOWN}
 
-            for res in yolo(frame, stream=True):
+            for res in yolo(small_frame, stream=True):
                 for box, cls, conf in zip(res.boxes.xyxy, res.boxes.cls, res.boxes.conf):
                     label = yolo.names[int(cls)]
                     if label not in ["car", "truck", "bus", "motorbike"]:

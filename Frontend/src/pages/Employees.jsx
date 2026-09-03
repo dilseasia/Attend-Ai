@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle, Trash2, Clock, UserPlus } from "lucide-react";
+import { API_BASE_URL } from "../config";
 
 export default function Employees() {
   const [name, setName] = useState("");
@@ -20,7 +21,7 @@ export default function Employees() {
 
   const fetchEmployees = async () => {
     try {
-      const res = await fetch("http://10.8.11.183:8000/api/employees");
+      const res = await fetch(`${API_BASE_URL}/api/employees`);
       const json = await res.json();
       const data = json.employees || json;
       setEmployees(data.sort((a, b) => a.name.localeCompare(b.name)));
@@ -31,7 +32,7 @@ export default function Employees() {
 
   const fetchAverageWorkingHours = async () => {
     try {
-      const res = await fetch("http://10.8.11.183:8000/api/average-working-hours");
+      const res = await fetch(`${API_BASE_URL}/api/average-working-hours`);
       const json = await res.json();
       const avgMap = {};
       json.averages.forEach((a) => {
@@ -56,7 +57,7 @@ export default function Employees() {
     formData.append("photo", photo);
 
     try {
-      const res = await fetch("http://10.8.11.183:8000/api/add-employee", {
+      const res = await fetch(`${API_BASE_URL}/api/add-employee`, {
         method: "POST",
         body: formData,
       });
@@ -92,7 +93,7 @@ export default function Employees() {
 
     const folderName = `${emp.name}_${emp.emp_id}`;
     try {
-      const res = await fetch(`http://10.8.11.183:8000/api/delete-employee/${folderName}`, {
+      const res = await fetch(`${API_BASE_URL}/api/delete-employee/${folderName}`, {
         method: "DELETE",
       });
       

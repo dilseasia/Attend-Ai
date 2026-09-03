@@ -7,6 +7,8 @@ import subprocess
 import time
 import logging
 import calendar
+import urllib.request
+import urllib.parse
 import asyncio
 from collections import defaultdict
 from datetime import datetime, date as dt_date, time as dt_time, timedelta
@@ -41,7 +43,7 @@ from fastapi import (
     status
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -120,7 +122,36 @@ THRESHOLD = 0.5
 LIVENESS_THRESHOLD = 0.6  # Adjustable threshold for liveness detection
 
 
-app = FastAPI(title="Face Attendance Server")
+from zoneinfo import ZoneInfo
+import json
+from pathlib import Path
+
+# Timezone & Base URL Configuration
+IST = ZoneInfo("Asia/Kolkata")
+
+def get_base_url_from_json():
+    """Read base URL from baseurl.json file with fallback to http://10.8.21.52:8000"""
+    try:
+        baseurl_file = Path("baseurl.json")
+        if baseurl_file.exists():
+            with open(baseurl_file, 'r') as f:
+                data = json.load(f)
+                return data.get('baseurl') or data.get('base_url') or "http://10.8.21.52:8000"
+        else:
+            return "http://10.8.21.52:8000"
+    except Exception as e:
+        logging.warning(f"⚠️ Error reading baseurl.json: {e}")
+        return "http://10.8.21.52:8000"
+
+# --- Subpath Hosting Configuration ---
+ROOT_PATH = os.getenv("ROOT_PATH", "/faceattendance")
+print(f"🚀 FastAPI starting with root_path: '{ROOT_PATH}'")
+
+app = FastAPI(
+    title="Face Attendance Server",
+    root_path=ROOT_PATH,
+    servers=[{"url": ROOT_PATH}] if ROOT_PATH else None
+)
 
 #  Enable CORS for frontend
 app.add_middleware(
@@ -263,7 +294,7 @@ def load_known_face_embeddings_cached():
     
     known_faces = {}
     known_embeddings = []
-    base_url = "http://10.8.11.183:8000"
+    base_url = get_base_url_from_json()
     
     if not os.path.exists("known_faces"):
         logging.warning("⚠️ Known faces directory not found")
@@ -828,7 +859,8 @@ async def approve_request(
                         emp_id=emp_id,
                         date=date,
                         time=entry_time,
-                        camera="Entry"
+                        camera="Entry",
+                        location_type="wfh"
                     )
                     
                     # Log Exit with actual out_time
@@ -840,7 +872,8 @@ async def approve_request(
                             emp_id=emp_id,
                             date=date,
                             time=exit_time,
-                            camera="Exit"
+                            camera="Exit",
+                            location_type="wfh"
                         )
                 
                 elif request_type == "manual_capture":
@@ -853,7 +886,8 @@ async def approve_request(
                             emp_id=emp_id,
                             date=date,
                             time=entry_time,
-                            camera="Entry"
+                            camera="Entry",
+                            location_type="office"
                         )
                     
                     # Log Exit if out_time exists
@@ -865,7 +899,8 @@ async def approve_request(
                             emp_id=emp_id,
                             date=date,
                             time=exit_time,
-                            camera="Exit"
+                            camera="Exit",
+                            location_type="office"
                         )
 
             except Exception as log_error:
@@ -1345,7 +1380,7 @@ async def recognize_face(
             else:
                 token_message = "No FCM token provided"
             
-            # Get dynamic base URL
+            # Base URL
             base_url = get_base_url_from_json()
             
             # Fix profile photo URL
@@ -1615,7 +1650,7 @@ async def add_employee(name: str = Form(...), emp_id: str = Form(...), photo: Up
 
 @app.get("/api/employees")
 def get_employees():
-    base_url = "http://10.8.11.183:8000/known_faces"
+    base_url = f"{get_base_url_from_json()}/known_faces"
     employees = []
 
     if not os.path.exists("known_faces"):
@@ -1647,7 +1682,7 @@ def get_employees():
 
 @app.get("/api/employees-mobile")
 def get_employees(current_user: dict = Depends(get_current_user)):
-    base_url = "http://10.8.11.183:8000/known_faces"
+    base_url = f"{get_base_url_from_json()}/known_faces"
     employees = []
 
     if not os.path.exists("known_faces"):
@@ -1796,6 +1831,51 @@ def get_logs():
         print("Error fetching logs: - fastapi_server.py:621", e)
         return {"total": 0, "logs": [], "collective": []}
 
+    finally:
+        if conn:
+            conn.close()
+
+@app.get("/api/logs/by-type")
+def get_attendance_type_by_date(
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    emp_id: str = Query(..., description="Employee ID")
+):
+    """
+    Returns attendance location_type ('wfh', 'office', or 'absent') for a given employee on a date.
+    Queries the 'location_type' column (with fallback to 'camera' or 'office').
+    Response expected by Report.jsx:
+    {
+        "success": true,
+        "status": "wfh" | "office" | "absent"
+    }
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        # Query location_type column (if location_type column is present or camera column as fallback)
+        cursor.execute("""
+            SELECT ARRAY_AGG(DISTINCT LOWER(COALESCE(location_type, camera, 'office'))) as types
+            FROM attendance_logs
+            WHERE DATE(date) = %s AND emp_id = %s
+        """, (date, emp_id))
+
+        row = cursor.fetchone()
+        types = row[0] if row and row[0] else []
+
+        if not types:
+            return {"success": True, "status": "absent"}
+
+        # If any log is marked as wfh (or WFH), return 'wfh'
+        if "wfh" in types:
+            return {"success": True, "status": "wfh"}
+
+        return {"success": True, "status": "office"}
+
+    except Exception as e:
+        logging.error(f"❌ Error in /api/logs/by-type: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
@@ -1958,12 +2038,19 @@ def get_employee_entries_with_photos(
 
                     # Match HH-MM-SS in filename
                     if time_for_filename in file:
-                        base_url = "http://10.8.11.183:8000"
+                        base_url = get_base_url_from_json()
                         exact_photo_url = (
                             f"{base_url}/recognized_photos/"
                             f"{log_date}/{emp_folder}/{camera}/{file}"
                         )
                         break
+
+            if not exact_photo_url:
+                base_url = get_base_url_from_json()
+                exact_photo_url = (
+                    f"{base_url}/recognized_photos/"
+                    f"{log_date}/{emp_folder}/{camera}/{log_date}_{time_for_filename}.jpg"
+                )
 
             results.append({
                 "emp_id": emp_id,
@@ -3339,28 +3426,6 @@ def get_day_status(total_hours: str, office_hours: str) -> str:
     return "Short Day"
 
 
-
-# Add this helper function near the top of your file (after imports)
-import json
-from pathlib import Path
-
-def get_base_url_from_json():
-    """Read base URL from baseurl.json file"""
-    try:
-        baseurl_file = Path("baseurl.json")
-        if baseurl_file.exists():
-            with open(baseurl_file, 'r') as f:
-                data = json.load(f)
-                # Check both possible field names
-                return data.get('baseurl') or data.get('base_url') or "http://localhost:8000"
-        else:
-            return "http://localhost:8000"
-    except Exception as e:
-        print(f"⚠️ Error reading baseurl.json: {e}")
-        return "http://localhost:8000"
-
-
-# Replace your existing API function with this updated version
 @app.get("/api/logs/day-status")
 def get_day_attendance_status(
     emp_id: str = Query(...),
@@ -3373,7 +3438,7 @@ def get_day_attendance_status(
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
         ref_date = datetime.strptime(date, "%Y-%m-%d").date()
-        today = datetime.now()
+        today = datetime.now(IST)
 
         # ======================
         # DATE RANGE
@@ -3431,7 +3496,7 @@ def get_day_attendance_status(
         # PROFILE PHOTO (SKIP auto_ & embeddings)
         # ======================
         profile_photo = None
-        base_url = get_base_url_from_json()  # 🔥 Read from baseurl.json
+        base_url = get_base_url_from_json()
 
         if os.path.exists("known_faces"):
             for folder in os.listdir("known_faces"):
@@ -3568,11 +3633,19 @@ def get_day_attendance_status(
                 if os.path.exists(photo_folder):
                     for f in os.listdir(photo_folder):
                         if time_key in f:
+                            base_url = get_base_url_from_json()
                             photo_url = (
                                 f"{base_url}/recognized_photos/"
                                 f"{day_str}/{emp_folder}/{camera}/{f}"
                             )
                             break
+
+                if not photo_url:
+                    base_url = get_base_url_from_json()
+                    photo_url = (
+                        f"{base_url}/recognized_photos/"
+                        f"{day_str}/{emp_folder}/{camera}/{day_str}_{time_key}.jpg"
+                    )
 
                 entries_exits.append({
                     "time": time_str,
@@ -3718,10 +3791,55 @@ def get_average_working_hours():
 
 
 
+# Photo Bridge Route with Fallback to Local GPU Machine (10.8.21.52:8000)
+@app.get("/recognized_photos/{file_path:path}")
+async def get_recognized_photo(file_path: str):
+    local_dir = os.path.abspath("recognized_photos")
+    local_path = os.path.join(local_dir, file_path)
+    if os.path.exists(local_path) and os.path.isfile(local_path):
+        return FileResponse(local_path)
+    
+    # Bridge fallback to Local GPU machine
+    encoded_path = urllib.parse.quote(file_path)
+    remote_url = f"http://10.8.21.52:8000/recognized_photos/{encoded_path}"
+    try:
+        req = urllib.request.Request(remote_url, headers={'User-Agent': 'FastAPI-PhotoBridge/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            content = resp.read()
+            media_type = resp.headers.get("Content-Type", "image/jpeg")
+            return Response(content=content, media_type=media_type)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Photo not found: {e}")
+
+# Known Faces Bridge Route with Fallback to Local GPU Machine (10.8.21.52:8000)
+@app.get("/known_faces/{file_path:path}")
+async def get_known_face_photo(file_path: str):
+    local_dir = os.path.abspath("known_faces")
+    local_path = os.path.join(local_dir, file_path)
+    if os.path.exists(local_path) and os.path.isfile(local_path):
+        return FileResponse(local_path)
+    
+    # Bridge fallback to Local GPU machine
+    encoded_path = urllib.parse.quote(file_path)
+    remote_url = f"http://10.8.21.52:8000/known_faces/{encoded_path}"
+    try:
+        req = urllib.request.Request(remote_url, headers={'User-Agent': 'FastAPI-KnownFacesBridge/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            content = resp.read()
+            media_type = resp.headers.get("Content-Type", "image/jpeg")
+            return Response(content=content, media_type=media_type)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Known face photo not found: {e}")
+
 # Serve static folders
-app.mount("/known_faces", StaticFiles(directory="known_faces"), name="known_faces")
-app.mount("/recognized_photos", StaticFiles(directory=os.path.abspath("recognized_photos")), name="recognized_photos")
 app.mount("/unscanned_photos", StaticFiles(directory=os.path.abspath("Unscanned")), name="unscanned_photos")
+
+@app.get("/baseurl.json")
+def serve_baseurl_json():
+    """Serve baseurl.json file so frontend web clients can locate backend API"""
+    if os.path.exists("baseurl.json"):
+        return FileResponse("baseurl.json", media_type="application/json")
+    return {"base_url": "https://pstgs.appsndevs.com/faceattendance", "baseurl": "https://pstgs.appsndevs.com/faceattendance"}
 
 
 # 🎥 Live stream (Entry & Exit)
@@ -3945,7 +4063,7 @@ def convert_anonymous(data: dict = Body(...)):
         print(f" Attendance logging failed: {e} - fastapi_server.py:716")
 
     #  Generate frontend-accessible URL
-    base_url = "http://10.8.11.183:8000"
+    base_url = get_base_url_from_json()
     image_url = f"{base_url}/recognized_photos/{date_str}/{emp_folder}/{camera}/{new_filename}"
 
     #  Response

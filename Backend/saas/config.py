@@ -6,7 +6,7 @@ PLAN_LIMITS = {
 }
 
 MASTER_DB_CONFIG = {
-    "host": "10.8.21.51",
+    "host": "10.8.21.52",
     "port": 5432,
     "user": "postgres",
     "password": "daljeet@123",
@@ -14,7 +14,7 @@ MASTER_DB_CONFIG = {
 }
 
 POSTGRES_ADMIN_CONFIG = {
-    "host": "10.8.21.51",
+    "host": "10.8.21.52",
     "port": 5432,
     "user": "postgres",
     "password": "daljeet@123",

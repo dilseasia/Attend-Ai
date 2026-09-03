@@ -3,6 +3,7 @@ import axios from "axios";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Eye, X } from "lucide-react";
+import { API_BASE_URL } from "../config";
 
 export default function Log() {
   const navigate = useNavigate();
@@ -42,7 +43,7 @@ export default function Log() {
   // 👥 Fetch employees
   const fetchEmployees = async () => {
     try {
-      const res = await axios.get("http://10.8.11.183:8000/api/employees");
+      const res = await axios.get(`${API_BASE_URL}/api/employees`);
       const data = Array.isArray(res.data)
         ? res.data
         : res.data?.employees || [];
@@ -56,7 +57,7 @@ export default function Log() {
   // 📜 Fetch logs
   const fetchLogs = async () => {
     try {
-      const res = await axios.get("http://10.8.11.183:8000/api/logs/all");
+      const res = await axios.get(`${API_BASE_URL}/api/logs/all`);
       const data = Array.isArray(res.data)
         ? res.data
         : res.data?.logs || [];
@@ -76,7 +77,7 @@ export default function Log() {
 
     try {
       const res = await axios.get(
-        `http://10.8.11.183:8000/api/employee-entries-with-photos`,
+        `${API_BASE_URL}/api/employee-entries-with-photos`,
         {
           params: {
             emp_id: empId,
@@ -238,7 +239,7 @@ export default function Log() {
         }
 
         for (const row of mergedRows) {
-          await axios.post("http://10.8.11.183:8000/api/save-daily-summary", {
+          await axios.post(`${API_BASE_URL}/api/save-daily-summary`, {
             emp_id: row.employee_id,
             name: row.name.split(" (")[0],
             date: searchDate,

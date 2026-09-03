@@ -34,25 +34,20 @@ def run_with_restart(script_name, description):
         try:
             print(f"🚀 Starting {description}... - main.py:12")
             result = subprocess.run(
-                ["python3", script_name],
-                check=True,
-                capture_output=True,
-                text=True
+                [sys.executable, script_name],
+                check=True
             )
         except subprocess.CalledProcessError as e:
-            print(f"❌ {description} crashed: {e} - main.py:20")
-            print(f"stderr: {e.stderr} - main.py:21")
+            print(f"❌ {description} crashed with exit code {e.returncode} - main.py:20")
             print(f"🔄 Restarting {description} in 3 seconds... - main.py:22")
             time.sleep(3)
         except Exception as e:
             print(f"❌ Unexpected error in {description}: {e} - main.py:25")
             time.sleep(3)
 
-def run_entry_camera():
-    run_with_restart("entry.py", "Entry Camera")
-
-def run_exit_camera():
-    run_with_restart("exit.py", "Exit Camera")
+def run_camera_engine():
+    """Unified batch camera engine — entry + exit in one process, one shared model"""
+    run_with_restart("camera_engine.py", "Camera Engine (Batch)")
 
 def run_entry_vehicle():
     run_with_restart("entry_vehicle.py", "Entry Vehicle")
@@ -65,7 +60,7 @@ def run_backend():
         try:
             print("🚀 Starting FastAPI backend... - main.py:43")
             subprocess.run(
-                ["uvicorn", "fastapi_server:app", "--host", "0.0.0.0", "--port", "8000"],
+                [sys.executable, "-m", "uvicorn", "fastapi_server:app", "--host", "0.0.0.0", "--port", "8000"],
                 check=True
             )
         except Exception as e:
@@ -132,8 +127,7 @@ def start_all_processes():
     
     # Create all processes
     processes = [
-        Process(target=run_entry_camera, name="EntryCamera"),
-        Process(target=run_exit_camera, name="ExitCamera"),
+        Process(target=run_camera_engine, name="CameraEngine"),   # ✅ Batch: entry+exit in 1 process
         # Process(target=run_entry_vehicle, name="EntryVehicle"),
         Process(target=run_exit_vehicle, name="ExitVehicle"),
         Process(target=run_backend, name="Backend")

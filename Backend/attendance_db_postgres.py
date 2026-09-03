@@ -6,7 +6,7 @@ DB_CONFIG = {
     "dbname": "attendanceDB",
     "user": "postgres",
     "password": "daljeet@123",
-    "host": "10.8.21.51",
+    "host": "localhost",
     "port": "5432"      
 }
 
@@ -23,7 +23,7 @@ def get_connection():
 
 
 def init_db():
-    """Create the attendance_logs table if it doesn't exist."""
+    """Create the attendance_logs table if it doesn't exist and ensure location_type column exists."""
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
@@ -34,24 +34,29 @@ def init_db():
                         emp_id TEXT,
                         date DATE,
                         time TIME,
-                        camera TEXT
+                        camera TEXT,
+                        location_type TEXT DEFAULT 'office'
                     )
                 ''')
-        print("✅ Table 'attendance_logs' ready.")
+                cursor.execute('''
+                    ALTER TABLE attendance_logs 
+                    ADD COLUMN IF NOT EXISTS location_type TEXT DEFAULT 'office'
+                ''')
+        print("✅ Table 'attendance_logs' with 'location_type' ready.")
     except Exception as e:
-        print("❌ Failed to create attendance_logs table:", e)
+        print("❌ Failed to create/update attendance_logs table:", e)
 
 
-def log_attendance(name, emp_id, date, time, camera):
+def log_attendance(name, emp_id, date, time, camera, location_type='office'):
     """Insert a new attendance log."""
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
-                    INSERT INTO attendance_logs (name, emp_id, date, time, camera)
-                    VALUES (%s, %s, %s, %s, %s)
-                ''', (name, emp_id, date, time, camera))
-        print(f"🕒 Attendance logged for {name} ({emp_id}) on {date} at {time}.")
+                    INSERT INTO attendance_logs (name, emp_id, date, time, camera, location_type)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', (name, emp_id, date, time, camera, location_type))
+        print(f"🕒 Attendance logged for {name} ({emp_id}) on {date} at {time} [{location_type}].")
     except Exception as e:
         print("❌ Failed to log attendance:", e)
 

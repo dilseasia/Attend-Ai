@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { API_BASE_URL } from '../config';
 
 export default function LiveCameras() {
   const entryRef = useRef(null);
@@ -70,7 +71,7 @@ export default function LiveCameras() {
           <h3 className="mb-2 font-medium text-lg">Entry Camera</h3>
           <img
             ref={entryRef}
-            src="http://10.8.11.183:8000/entry_stream"
+            src={`${API_BASE_URL}/entry_stream`}
             alt="Entry Camera"
             className="w-96 h-64 rounded-2xl border object-contain shadow"
           />
@@ -93,7 +94,7 @@ export default function LiveCameras() {
           <h3 className="mb-2 font-medium text-lg">Exit Camera</h3>
           <img
             ref={exitRef}
-            src="http://10.8.11.183:8000/exit_stream"
+            src={`${API_BASE_URL}/exit_stream`}
             alt="Exit Camera"
             className="w-96 h-64 rounded-2xl border object-contain shadow"
           />

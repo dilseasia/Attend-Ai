@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, CheckCircle, XCircle, AlertCircle, User, Calendar, Filter, X, Search, RefreshCw, FileText, Shield, Building2 } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 const AttendanceRequestPage = () => {
   const [requests, setRequests] = useState([]);
@@ -15,7 +16,7 @@ const AttendanceRequestPage = () => {
   const [successMessage, setSuccessMessage] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const API_BASE = 'http://10.8.11.183:8000';
+  const API_BASE = API_BASE_URL;
   const AUTH_TOKEN = 'TOKEN_admin';
 
   useEffect(() => {

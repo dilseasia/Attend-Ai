@@ -1,0 +1,51 @@
+# Environment & Dependencies
+venv/
+**/venv/
+myenv/
+**/myenv/
+node_modules/
+**/node_modules/
+.env
+*.env
+
+# Python Bytecode & Cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Logs & Runtime Files
+*.log
+**/*.log
+logs/
+**/logs/
+
+# Dynamic Photos & Backups
+recognized_photos/
+**/recognized_photos/
+exports/
+**/exports/
+*.zip
+database_backup/
+Unscanned/
+**/Unscanned/
+Anonymous/
+**/Anonymous/
+
+# ML Models & Heavy Weights
+*.pt
+*.onnx
+*.weights
+*.bin
+
+# Temporary & Local Overrides
+baseurl.json.backup
+*.swp
+*.tmp
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -13,7 +13,7 @@ CAMERA_NAMES = ["Entry", "Exit"]
 THRESHOLD = 0.5
 ANONYMOUS_DIR = "Anonymous"
 KNOWN_DIR = "known_faces"
-API_URL = "http://10.8.21.51:8000/api/convert-anonymous"  # Your FastAPI endpoint
+API_URL = "http://10.8.21.52:8000/api/convert-anonymous"  # Your FastAPI endpoint
 CHECK_INTERVAL = 60  # seconds to check if hour changed (e.g. 60s)
 LOG_FILE = "anonymous_recognizer.log"
 

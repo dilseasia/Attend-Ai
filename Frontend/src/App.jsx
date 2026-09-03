@@ -115,6 +115,3 @@ export default function App() {
   );
 }
 
-[
-  { "name": "John", "employee_id": "E001", "date": "2024-06-27", "status": "Present" }
-]

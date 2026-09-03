@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiTrash2, FiCheckCircle, FiUserCheck } from "react-icons/fi";
 import axios from "axios";
+import { API_BASE_URL } from "../config";
 
 export default function Anonymous() {
   const [dates, setDates] = useState([]);
@@ -39,12 +40,12 @@ export default function Anonymous() {
 
   useEffect(() => {
     axios
-      .get("http://10.8.21.51:8000/api/anonymous-dates")
+      .get(`${API_BASE_URL}/api/anonymous-dates`)
       .then((res) => setDates(res.data.dates || []))
       .catch(() => setDates([]));
 
     axios
-      .get("http://10.8.21.51:8000/api/employees")
+      .get(`${API_BASE_URL}/api/employees`)
       .then((res) => {
         const data = Array.isArray(res.data)
           ? res.data
@@ -58,7 +59,7 @@ export default function Anonymous() {
     if (!selectedDate || loading || !hasMore) return;
     setLoading(true);
     try {
-      const res = await axios.get("http://10.8.21.51:8000/api/anonymous-images", {
+      const res = await axios.get(`${API_BASE_URL}/api/anonymous-images`, {
         params: {
           date: selectedDate,
           filter,
@@ -115,7 +116,7 @@ export default function Anonymous() {
     try {
       let imgPath = images[current].path.split("?")[0];
       if (imgPath.startsWith("/")) imgPath = imgPath.slice(1);
-      await axios.post("http://10.8.21.51:8000/api/delete-anonymous-image", {
+      await axios.post(`${API_BASE_URL}/api/delete-anonymous-image`, {
         path: imgPath,
       });
       setImages((prev) => prev.filter((_, idx) => idx !== current));
@@ -139,7 +140,7 @@ export default function Anonymous() {
       if (anon_path.startsWith("/")) anon_path = anon_path.slice(1);
 
       const res = await axios.post(
-        "http://10.8.21.51:8000/api/convert-anonymous",
+        `${API_BASE_URL}/api/convert-anonymous`,
         { emp_id, name, anon_path, camera }
       );
 
@@ -233,7 +234,7 @@ export default function Anonymous() {
                   className={`relative text-center rounded-2xl overflow-hidden bg-white ${highlight}`}
                 >
                   <motion.img
-                    src={`http://10.8.21.51:8000${img.path}`}
+                    src={`${API_BASE_URL}${img.path}`}
                     onClick={() => openModal(idx)}
                     className="rounded-2xl w-full h-48 object-cover cursor-pointer hover:scale-105 transition"
                     whileHover={{ scale: 1.05 }}
@@ -295,7 +296,7 @@ export default function Anonymous() {
               </button>
 
               <img
-                src={`http://10.8.21.51:8000${images[current].path}`}
+                src={`${API_BASE_URL}${images[current].path}`}
                 className="rounded-2xl w-[80vw] max-w-xl h-[60vh] object-contain"
               />
 

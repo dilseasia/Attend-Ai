@@ -6,6 +6,8 @@ import {
   BarChart, Bar
 } from 'recharts';
 
+import { API_BASE_URL } from '../config';
+
 export default function Dashboard() {
   const [stats, setStats] = useState({
     totalPresent: 0,
@@ -25,7 +27,7 @@ export default function Dashboard() {
   const [selectedMonthDate, setSelectedMonthDate] = useState(new Date());
   const [dailyViewMode, setDailyViewMode] = useState('today'); // 'today' or 'custom'
 
-  const BASE_URL = "http://10.8.11.183:8000";
+  const BASE_URL = API_BASE_URL;
 
   // Fetch stats whenever dates change
   useEffect(() => {

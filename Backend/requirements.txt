@@ -1,0 +1,42 @@
+# Face Attendance Backend - Requirements
+# Python 3.12+
+
+# FastAPI & Server
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# Database
+psycopg2-binary==2.9.10
+
+# Computer Vision & Face Recognition
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+face-recognition==1.3.0
+insightface==0.7.3
+onnxruntime==1.20.1
+
+# Image Processing
+Pillow==11.0.0
+
+# HTTP requests (for FCM notifications)
+requests==2.32.3
+
+# Google Auth (for Firebase Cloud Messaging)
+google-auth==2.36.0
+
+# Pydantic (FastAPI dependency)
+pydantic==2.9.2
+
+# System monitoring
+psutil==6.1.0
+
+# Scipy (required by insightface)
+scipy==1.14.1
+
+# Vehicle Detection (YOLO)
+ultralytics
+
+# Setuptools constraint for face-recognition pkg_resources compatibility
+setuptools<70
+
